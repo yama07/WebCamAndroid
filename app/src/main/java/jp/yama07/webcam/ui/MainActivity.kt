@@ -59,21 +59,18 @@ class MainActivity : AppCompatActivity() {
           .newInstance(previewSize.width, previewSize.height, ImageFormat.YUV_420_888, 2)
           .apply {
             setOnImageAvailableListener({ reader ->
-              val image = reader.acquireLatestImage()
+              val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+              if(isProcessing) {
+                image.close()
+                return@setOnImageAvailableListener
+              }
+              isProcessing = true
 
-              val yBuf = image.planes[0].buffer
-              val yBufSize = yBuf.remaining()
+              val yuvBytes = Array(3) { i ->
+                var buf = image.planes[i].buffer
+                ByteArray(buf.remaining()).also { buf.get(it) }
+              }
 
-              val uBuf = image.planes[1].buffer
-              val uBufSize = uBuf.remaining()
-
-              val vBuf = image.planes[2].buffer
-              val vBufSize = vBuf.remaining()
-
-              val yuvBytes = Array<ByteArray?>(3, { null })
-              yuvBytes[0] = ByteArray(yBufSize).also { yBuf.get(it) }
-              yuvBytes[1] = ByteArray(uBufSize).also { uBuf.get(it) }
-              yuvBytes[2] = ByteArray(vBufSize).also { vBuf.get(it) }
               val yRowStride = image.planes[0].rowStride
               val uvRowStride = image.planes[1].rowStride
               val uvPixelStride = image.planes[1].pixelStride
@@ -82,11 +79,11 @@ class MainActivity : AppCompatActivity() {
               Runnable {
                 Timber.d("ImageConvert: Start.")
 
-                val rgbBytes = IntArray(previewSize.width * previewSize.height, { 0 })
+                val rgbBytes = IntArray(previewSize.width * previewSize.height)
                 ImageUtil.convertYuv420ToArgb8888(
-                  yuvBytes[0]!!,
-                  yuvBytes[1]!!,
-                  yuvBytes[2]!!,
+                  yuvBytes[0],
+                  yuvBytes[1],
+                  yuvBytes[2],
                   previewSize.width,
                   previewSize.height,
                   yRowStride,
@@ -104,6 +101,8 @@ class MainActivity : AppCompatActivity() {
                   }
                 Timber.d("ImageConvert: Finish.")
                 server.body = rgbFrameBitmap.toJpegByteArray()
+
+                isProcessing = false
               }.run()
             }, backgroundHandler)
           }
@@ -121,7 +120,8 @@ class MainActivity : AppCompatActivity() {
   private lateinit var cameraComponent: CameraComponent
   private val captureManager = MediatorLiveData<Unit>()
   private lateinit var imageReader: ImageReader
-  private val previewSize = Size(640, 480)
+  private var previewSize = Size(640, 480)
+  private var isProcessing = false
 
   private fun setupCaptureManager() {
     captureManager.addSourceNonNullObserve(cameraComponent.cameraDeviceLiveData) { cameraDeviceData ->
