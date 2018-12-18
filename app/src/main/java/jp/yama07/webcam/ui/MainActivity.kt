@@ -1,7 +1,9 @@
 package jp.yama07.webcam.ui
 
+import android.arch.lifecycle.LifecycleOwner
 import android.arch.lifecycle.LiveData
 import android.arch.lifecycle.MediatorLiveData
+import android.arch.lifecycle.MutableLiveData
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.ImageFormat
@@ -27,16 +29,20 @@ import jp.yama07.webcam.util.addSourceNonNullObserve
 import jp.yama07.webcam.util.toJpegByteArray
 import kotlinx.android.synthetic.main.activity_main.*
 import timber.log.Timber
+import java.io.BufferedOutputStream
 import java.io.ByteArrayInputStream
+import java.io.PipedInputStream
+import java.io.PipedOutputStream
 
 class MainActivity : AppCompatActivity() {
   private lateinit var server: WebCamServer
+  private val bmpLiveData = MutableLiveData<ByteArray>()
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     setContentView(R.layout.activity_main)
 
-    server = WebCamServer("0.0.0.0", 8080).also { it.start() }
+    server = WebCamServer("0.0.0.0", 8080, this, bmpLiveData, backgroundHandler).also { it.start() }
 
     cameraComponent = CameraComponent(
       cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager,
@@ -60,14 +66,16 @@ class MainActivity : AppCompatActivity() {
           .apply {
             setOnImageAvailableListener({ reader ->
               val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-              if(isProcessing) {
+              if (isProcessing) {
                 image.close()
                 return@setOnImageAvailableListener
               }
               isProcessing = true
 
+              val imageSize = Size(image.width, image.height)
+
               val yuvBytes = Array(3) { i ->
-                var buf = image.planes[i].buffer
+                val buf = image.planes[i].buffer
                 ByteArray(buf.remaining()).also { buf.get(it) }
               }
 
@@ -79,28 +87,29 @@ class MainActivity : AppCompatActivity() {
               Runnable {
                 Timber.d("ImageConvert: Start.")
 
-                val rgbBytes = IntArray(previewSize.width * previewSize.height)
+                val rgbBytes = IntArray(imageSize.width * imageSize.height)
                 ImageUtil.convertYuv420ToArgb8888(
                   yuvBytes[0],
                   yuvBytes[1],
                   yuvBytes[2],
-                  previewSize.width,
-                  previewSize.height,
+                  imageSize.width,
+                  imageSize.height,
                   yRowStride,
                   uvRowStride,
                   uvPixelStride,
                   rgbBytes
                 )
                 val rgbFrameBitmap = Bitmap
-                  .createBitmap(width, previewSize.height, Bitmap.Config.ARGB_8888)
+                  .createBitmap(imageSize.width, imageSize.height, Bitmap.Config.ARGB_8888)
                   .also { bmp ->
                     bmp.setPixels(
-                      rgbBytes, 0, previewSize.width, 0, 0,
-                      previewSize.width, previewSize.height
+                      rgbBytes, 0, imageSize.width, 0, 0,
+                      imageSize.width, imageSize.height
                     )
                   }
                 Timber.d("ImageConvert: Finish.")
                 server.body = rgbFrameBitmap.toJpegByteArray()
+                bmpLiveData.postValue(rgbFrameBitmap.toJpegByteArray())
 
                 isProcessing = false
               }.run()
@@ -109,6 +118,10 @@ class MainActivity : AppCompatActivity() {
         lifecycle.addObserver(cameraComponent)
         captureManager.observe(this@MainActivity) {}
       }
+    }
+
+    bmpLiveData.observe(this) {
+      Timber.d("observe: ${it?.size}")
     }
   }
 
@@ -176,14 +189,49 @@ class MainActivity : AppCompatActivity() {
     }
   }
 
-  class WebCamServer(host: String, port: Int) : NanoHTTPD(host, port) {
+  class WebCamServer(
+    host: String,
+    port: Int,
+    private val owner: LifecycleOwner,
+    private val bmpLiveData: LiveData<ByteArray>,
+    private val observeHandler: Handler?
+  ) : NanoHTTPD(host, port) {
     var body: ByteArray? = null
+
     override fun serve(session: IHTTPSession?): Response {
       Timber.d("Request URI: ${session?.uri}")
       return when (session?.uri) {
         "/current" -> {
           val input = ByteArrayInputStream(body)
           newChunkedResponse(Response.Status.OK, "image/jpeg", input)
+        }
+        "/mjpeg" -> {
+          val boundary = "--webcamserver"
+
+          val output = PipedOutputStream()
+          val input = PipedInputStream(output)
+
+          val bufferedOutput = BufferedOutputStream(output, 512 * 1000)
+
+          observeHandler?.post {
+            bmpLiveData.observe(owner) {
+              it ?: return@observe
+              bufferedOutput.write(boundary.toByteArray())
+              bufferedOutput.write("\r\n".toByteArray())
+              bufferedOutput.write("Content-Type: image/jpeg".toByteArray())
+              bufferedOutput.write("\r\n".toByteArray())
+              bufferedOutput.write("Content-Length: ${it.size}".toByteArray())
+              bufferedOutput.write("\r\n\r\n".toByteArray())
+              bufferedOutput.write(it)
+              bufferedOutput.write("\r\n".toByteArray())
+              bufferedOutput.flush()
+            }
+          }
+          newChunkedResponse(
+            Response.Status.OK,
+            "multipart/x-mixed-replace; boundary=$boundary",
+            input
+          )
         }
         else -> {
           newFixedLengthResponse("Hello world!")
