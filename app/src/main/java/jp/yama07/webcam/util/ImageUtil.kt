@@ -1,28 +1,27 @@
-package jp.yama07.webcam.ui
+package jp.yama07.webcam.util
+
+import android.util.Size
 
 object ImageUtil {
   fun convertYuv420ToArgb8888(
-    yData: ByteArray,
-    uData: ByteArray,
-    vData: ByteArray,
-    width: Int,
-    height: Int,
+    yubBytes: Array<ByteArray>,
+    size: Size,
     yRowStride: Int,
     uvRowStride: Int,
     uvPixelStride: Int,
     out: IntArray
   ) {
     var yp = 0
-    for (j in 0 until height) {
+    for (j in 0 until size.height) {
       val pY = yRowStride * j
       val pUV = uvRowStride * (j shr 1)
-      for (i in 0 until width) {
+      for (i in 0 until size.width) {
         val uvOffset = pUV + (i shr 1) * uvPixelStride
 
         out[yp++] = yuv2Rgb(
-          0xff and yData[pY + i].toInt(),
-          0xff and uData[uvOffset].toInt(),
-          0xff and vData[uvOffset].toInt()
+          0xff and yubBytes[0][pY + i].toInt(),
+          0xff and yubBytes[1][uvOffset].toInt(),
+          0xff and yubBytes[2][uvOffset].toInt()
         )
       }
     }

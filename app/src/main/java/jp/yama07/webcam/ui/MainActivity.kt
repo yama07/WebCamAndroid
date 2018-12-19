@@ -1,6 +1,5 @@
 package jp.yama07.webcam.ui
 
-import android.arch.lifecycle.LifecycleOwner
 import android.arch.lifecycle.LiveData
 import android.arch.lifecycle.MediatorLiveData
 import android.arch.lifecycle.MutableLiveData
@@ -19,30 +18,27 @@ import android.util.Size
 import android.view.Surface
 import android.view.TextureView
 import com.shopify.livedataktx.observe
-import fi.iki.elonen.NanoHTTPD
 import jp.yama07.webcam.R
 import jp.yama07.webcam.camera.CameraCaptureSessionData
 import jp.yama07.webcam.camera.CameraCaptureSessionData.CameraCaptureSessionStateEvents
 import jp.yama07.webcam.camera.CameraComponent
 import jp.yama07.webcam.camera.CameraDeviceData.DeviceStateEvents
+import jp.yama07.webcam.server.MjpegHTTPD
+import jp.yama07.webcam.util.ImageUtil
 import jp.yama07.webcam.util.addSourceNonNullObserve
 import jp.yama07.webcam.util.toJpegByteArray
 import kotlinx.android.synthetic.main.activity_main.*
 import timber.log.Timber
-import java.io.BufferedOutputStream
-import java.io.ByteArrayInputStream
-import java.io.PipedInputStream
-import java.io.PipedOutputStream
 
 class MainActivity : AppCompatActivity() {
-  private lateinit var server: WebCamServer
+  private lateinit var server: MjpegHTTPD
   private val bmpLiveData = MutableLiveData<ByteArray>()
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     setContentView(R.layout.activity_main)
-
-    server = WebCamServer("0.0.0.0", 8080, this, bmpLiveData, backgroundHandler).also { it.start() }
+    startBackgroundThread()
+    server = MjpegHTTPD("0.0.0.0", 8080, this, bmpLiveData, backgroundHandler).also { it.start() }
 
     cameraComponent = CameraComponent(
       cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager,
@@ -83,17 +79,13 @@ class MainActivity : AppCompatActivity() {
               val uvRowStride = image.planes[1].rowStride
               val uvPixelStride = image.planes[1].pixelStride
               image.close()
-
-              Runnable {
+              imgCnvHandler?.post {
                 Timber.d("ImageConvert: Start.")
 
                 val rgbBytes = IntArray(imageSize.width * imageSize.height)
                 ImageUtil.convertYuv420ToArgb8888(
-                  yuvBytes[0],
-                  yuvBytes[1],
-                  yuvBytes[2],
-                  imageSize.width,
-                  imageSize.height,
+                  yuvBytes,
+                  imageSize,
                   yRowStride,
                   uvRowStride,
                   uvPixelStride,
@@ -112,7 +104,7 @@ class MainActivity : AppCompatActivity() {
                 bmpLiveData.postValue(rgbFrameBitmap.toJpegByteArray())
 
                 isProcessing = false
-              }.run()
+              }
             }, backgroundHandler)
           }
         lifecycle.addObserver(cameraComponent)
@@ -172,10 +164,17 @@ class MainActivity : AppCompatActivity() {
 
   private var backgroundThread: HandlerThread? = null
   private var backgroundHandler: Handler? = null
+  private var imgCnvThread: HandlerThread? = null
+  private var imgCnvHandler: Handler? = null
   private fun startBackgroundThread() {
     backgroundThread = HandlerThread("ImageListener")
     backgroundThread?.start()
     backgroundHandler = Handler(backgroundThread?.looper)
+
+
+    imgCnvThread = HandlerThread("imageConverter")
+    imgCnvThread?.start()
+    imgCnvHandler = Handler(imgCnvThread?.looper)
   }
 
   private fun stopBackgroundThread() {
@@ -187,56 +186,15 @@ class MainActivity : AppCompatActivity() {
     } catch (e: InterruptedException) {
       Timber.e(e, "Exception!")
     }
-  }
 
-  class WebCamServer(
-    host: String,
-    port: Int,
-    private val owner: LifecycleOwner,
-    private val bmpLiveData: LiveData<ByteArray>,
-    private val observeHandler: Handler?
-  ) : NanoHTTPD(host, port) {
-    var body: ByteArray? = null
 
-    override fun serve(session: IHTTPSession?): Response {
-      Timber.d("Request URI: ${session?.uri}")
-      return when (session?.uri) {
-        "/current" -> {
-          val input = ByteArrayInputStream(body)
-          newChunkedResponse(Response.Status.OK, "image/jpeg", input)
-        }
-        "/mjpeg" -> {
-          val boundary = "--webcamserver"
-
-          val output = PipedOutputStream()
-          val input = PipedInputStream(output)
-
-          val bufferedOutput = BufferedOutputStream(output, 512 * 1000)
-
-          observeHandler?.post {
-            bmpLiveData.observe(owner) {
-              it ?: return@observe
-              bufferedOutput.write(boundary.toByteArray())
-              bufferedOutput.write("\r\n".toByteArray())
-              bufferedOutput.write("Content-Type: image/jpeg".toByteArray())
-              bufferedOutput.write("\r\n".toByteArray())
-              bufferedOutput.write("Content-Length: ${it.size}".toByteArray())
-              bufferedOutput.write("\r\n\r\n".toByteArray())
-              bufferedOutput.write(it)
-              bufferedOutput.write("\r\n".toByteArray())
-              bufferedOutput.flush()
-            }
-          }
-          newChunkedResponse(
-            Response.Status.OK,
-            "multipart/x-mixed-replace; boundary=$boundary",
-            input
-          )
-        }
-        else -> {
-          newFixedLengthResponse("Hello world!")
-        }
-      }
+    imgCnvThread?.quitSafely()
+    try {
+      imgCnvThread?.join()
+      imgCnvThread = null
+      imgCnvHandler = null
+    }catch (e: InternalError) {
+      Timber.e(e,"Exception!")
     }
   }
 
