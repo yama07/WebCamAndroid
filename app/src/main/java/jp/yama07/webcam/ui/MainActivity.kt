@@ -4,7 +4,6 @@ import android.arch.lifecycle.LiveData
 import android.arch.lifecycle.MediatorLiveData
 import android.arch.lifecycle.MutableLiveData
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCaptureSession
@@ -23,22 +22,21 @@ import jp.yama07.webcam.camera.CameraCaptureSessionData
 import jp.yama07.webcam.camera.CameraCaptureSessionData.CameraCaptureSessionStateEvents
 import jp.yama07.webcam.camera.CameraComponent
 import jp.yama07.webcam.camera.CameraDeviceData.DeviceStateEvents
-import jp.yama07.webcam.server.MjpegHTTPD
-import jp.yama07.webcam.util.ImageUtil
+import jp.yama07.webcam.server.MJpegHTTPD
+import jp.yama07.webcam.server.Yuv420Image
 import jp.yama07.webcam.util.addSourceNonNullObserve
-import jp.yama07.webcam.util.toJpegByteArray
 import kotlinx.android.synthetic.main.activity_main.*
 import timber.log.Timber
 
 class MainActivity : AppCompatActivity() {
-  private lateinit var server: MjpegHTTPD
-  private val bmpLiveData = MutableLiveData<ByteArray>()
+  private lateinit var server: MJpegHTTPD
+  private val cameraImage = MutableLiveData<Yuv420Image>()
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     setContentView(R.layout.activity_main)
     startBackgroundThread()
-    server = MjpegHTTPD("0.0.0.0", 8080, this, bmpLiveData, backgroundHandler).also { it.start() }
+    server = MJpegHTTPD("0.0.0.0", 8080, this, cameraImage, backgroundHandler).also { it.start() }
 
     cameraComponent = CameraComponent(
       cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager,
@@ -58,53 +56,25 @@ class MainActivity : AppCompatActivity() {
       override fun onSurfaceTextureAvailable(surface: SurfaceTexture?, width: Int, height: Int) {
         Timber.d("onSurfaceTextureAvailable: $width x $height")
         imageReader = ImageReader
-          .newInstance(previewSize.width, previewSize.height, ImageFormat.YUV_420_888, 2)
+          .newInstance(width, height, ImageFormat.YUV_420_888, 2)
           .apply {
             setOnImageAvailableListener({ reader ->
               val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-              if (isProcessing) {
-                image.close()
-                return@setOnImageAvailableListener
-              }
-              isProcessing = true
-
-              val imageSize = Size(image.width, image.height)
-
-              val yuvBytes = Array(3) { i ->
-                val buf = image.planes[i].buffer
-                ByteArray(buf.remaining()).also { buf.get(it) }
-              }
-
-              val yRowStride = image.planes[0].rowStride
-              val uvRowStride = image.planes[1].rowStride
-              val uvPixelStride = image.planes[1].pixelStride
-              image.close()
-              imgCnvHandler?.post {
-                Timber.d("ImageConvert: Start.")
-
-                val rgbBytes = IntArray(imageSize.width * imageSize.height)
-                ImageUtil.convertYuv420ToArgb8888(
-                  yuvBytes,
-                  imageSize,
-                  yRowStride,
-                  uvRowStride,
-                  uvPixelStride,
-                  rgbBytes
+              if (cameraImage.hasObservers()) {
+                val yuvImage = Yuv420Image(
+                  yuvBytes = Array(3) { i ->
+                    val buf = image.planes[i].buffer
+                    ByteArray(buf.remaining()).also { buf.get(it) }
+                  },
+                  size = Size(image.width, image.height),
+                  yRowStride = image.planes[0].rowStride,
+                  uvRowStride = image.planes[1].rowStride,
+                  uvPixelStride = image.planes[1].pixelStride
                 )
-                val rgbFrameBitmap = Bitmap
-                  .createBitmap(imageSize.width, imageSize.height, Bitmap.Config.ARGB_8888)
-                  .also { bmp ->
-                    bmp.setPixels(
-                      rgbBytes, 0, imageSize.width, 0, 0,
-                      imageSize.width, imageSize.height
-                    )
-                  }
-                Timber.d("ImageConvert: Finish.")
-                server.body = rgbFrameBitmap.toJpegByteArray()
-                bmpLiveData.postValue(rgbFrameBitmap.toJpegByteArray())
-
-                isProcessing = false
+                Timber.d("Post yuvImage: ${yuvImage.size}")
+                cameraImage.postValue(yuvImage)
               }
+              image.close()
             }, backgroundHandler)
           }
         lifecycle.addObserver(cameraComponent)
@@ -112,9 +82,10 @@ class MainActivity : AppCompatActivity() {
       }
     }
 
-    bmpLiveData.observe(this) {
-      Timber.d("observe: ${it?.size}")
-    }
+//    cameraImage.observe(this) {
+//      Timber.d("Observe@mainActivity: ${it?.size}")
+//    }
+
   }
 
   override fun onDestroy() {
@@ -125,8 +96,6 @@ class MainActivity : AppCompatActivity() {
   private lateinit var cameraComponent: CameraComponent
   private val captureManager = MediatorLiveData<Unit>()
   private lateinit var imageReader: ImageReader
-  private var previewSize = Size(640, 480)
-  private var isProcessing = false
 
   private fun setupCaptureManager() {
     captureManager.addSourceNonNullObserve(cameraComponent.cameraDeviceLiveData) { cameraDeviceData ->
@@ -193,8 +162,8 @@ class MainActivity : AppCompatActivity() {
       imgCnvThread?.join()
       imgCnvThread = null
       imgCnvHandler = null
-    }catch (e: InternalError) {
-      Timber.e(e,"Exception!")
+    } catch (e: InternalError) {
+      Timber.e(e, "Exception!")
     }
   }
 
