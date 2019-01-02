@@ -1,7 +1,7 @@
 package jp.yama07.webcam.util
 
-import android.arch.lifecycle.LiveData
-import android.arch.lifecycle.MediatorLiveData
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.MediatorLiveData
 
 fun <T, S> MediatorLiveData<T>.addSourceNonNullObserve(
   source: LiveData<S>,

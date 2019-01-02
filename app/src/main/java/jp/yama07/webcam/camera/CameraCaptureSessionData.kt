@@ -1,6 +1,6 @@
 package jp.yama07.webcam.camera
 
-import android.arch.lifecycle.MutableLiveData
+import androidx.lifecycle.MutableLiveData
 import android.hardware.camera2.*
 import android.os.Handler
 import android.view.Surface

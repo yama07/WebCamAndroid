@@ -1,6 +1,6 @@
 package jp.yama07.webcam.util
 
-import android.arch.lifecycle.Observer
+import androidx.lifecycle.Observer
 
 interface NonNullObserver<T> : Observer<T> {
 

@@ -1,7 +1,7 @@
 package jp.yama07.webcam.server
 
-import android.arch.lifecycle.LifecycleOwner
-import android.arch.lifecycle.LiveData
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LiveData
 import android.os.Handler
 import android.os.Looper
 import fi.iki.elonen.NanoHTTPD

@@ -1,7 +1,7 @@
 package jp.yama07.webcam.server
 
-import android.arch.lifecycle.LiveData
-import android.arch.lifecycle.MutableLiveData
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
 import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
