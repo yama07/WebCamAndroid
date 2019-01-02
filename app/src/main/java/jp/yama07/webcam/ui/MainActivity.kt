@@ -3,6 +3,7 @@ package jp.yama07.webcam.ui
 import android.arch.lifecycle.LiveData
 import android.arch.lifecycle.MediatorLiveData
 import android.arch.lifecycle.MutableLiveData
+import android.arch.lifecycle.Observer
 import android.content.Context
 import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
@@ -16,7 +17,6 @@ import android.support.v7.app.AppCompatActivity
 import android.util.Size
 import android.view.Surface
 import android.view.TextureView
-import com.shopify.livedataktx.observe
 import jp.yama07.webcam.R
 import jp.yama07.webcam.camera.CameraCaptureSessionData
 import jp.yama07.webcam.camera.CameraCaptureSessionData.CameraCaptureSessionStateEvents
@@ -36,7 +36,7 @@ class MainActivity : AppCompatActivity() {
     super.onCreate(savedInstanceState)
     setContentView(R.layout.activity_main)
     startBackgroundThread()
-    server = MJpegHTTPD("0.0.0.0", 8080, this, cameraImage, backgroundHandler).also { it.start() }
+    server = MJpegHTTPD("0.0.0.0", 8080, this, cameraImage, 20, imgCnvHandler).also { it.start() }
 
     cameraComponent = CameraComponent(
       cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager,
@@ -60,31 +60,30 @@ class MainActivity : AppCompatActivity() {
           .apply {
             setOnImageAvailableListener({ reader ->
               val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-              if (cameraImage.hasObservers()) {
-                val yuvImage = Yuv420Image(
-                  yuvBytes = Array(3) { i ->
-                    val buf = image.planes[i].buffer
-                    ByteArray(buf.remaining()).also { buf.get(it) }
-                  },
-                  size = Size(image.width, image.height),
-                  yRowStride = image.planes[0].rowStride,
-                  uvRowStride = image.planes[1].rowStride,
-                  uvPixelStride = image.planes[1].pixelStride
-                )
-                Timber.d("Post yuvImage: ${yuvImage.size}")
-                cameraImage.postValue(yuvImage)
-              }
+              val yuvImage = Yuv420Image(
+                yuvBytes = Array(3) { i ->
+                  val buf = image.planes[i].buffer
+                  ByteArray(buf.remaining()).also { buf.get(it) }
+                },
+                size = Size(image.width, image.height),
+                yRowStride = image.planes[0].rowStride,
+                uvRowStride = image.planes[1].rowStride,
+                uvPixelStride = image.planes[1].pixelStride
+              )
+              Timber.d("Post yuvImage: ${yuvImage.size}")
+              cameraImage.postValue(yuvImage)
               image.close()
             }, backgroundHandler)
           }
         lifecycle.addObserver(cameraComponent)
-        captureManager.observe(this@MainActivity) {}
+        captureManager.observe(this@MainActivity, Observer {})
       }
     }
 
 //    cameraImage.observe(this) {
 //      Timber.d("Observe@mainActivity: ${it?.size}")
 //    }
+
 
   }
 

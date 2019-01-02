@@ -4,13 +4,14 @@ import android.arch.lifecycle.LiveData
 import android.arch.lifecycle.MutableLiveData
 import android.graphics.Bitmap
 import android.os.Handler
+import android.os.Looper
 import jp.yama07.webcam.util.ImageUtil
 
-class Yuv420ToBitmapConverter(val handler: Handler?){
+class Yuv420ToBitmapConverter(val handler: Handler?) {
 
-  fun enqueue(image: Yuv420Image): LiveData<Bitmap>{
+  fun enqueue(image: Yuv420Image): LiveData<Bitmap> {
     val liveData = MutableLiveData<Bitmap>()
-    handler?.post{
+    (handler ?: Handler(Looper.myLooper())).post {
       val bitmap = execute(image)
       liveData.postValue(bitmap)
     }
@@ -18,7 +19,7 @@ class Yuv420ToBitmapConverter(val handler: Handler?){
     return liveData
   }
 
-  fun execute(image: Yuv420Image): Bitmap{
+  fun execute(image: Yuv420Image): Bitmap {
     val rgbBytes = IntArray(image.size.width * image.size.height)
     ImageUtil.convertYuv420ToArgb8888(
       image.yuvBytes,
