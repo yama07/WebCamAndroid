@@ -1,10 +1,5 @@
 package jp.yama07.webcam.ui
 
-import androidx.lifecycle.LiveData
-import androidx.lifecycle.MediatorLiveData
-import androidx.lifecycle.MutableLiveData
-import androidx.lifecycle.Observer
-import android.content.Context
 import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCaptureSession
@@ -13,10 +8,15 @@ import android.media.ImageReader
 import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
-import androidx.appcompat.app.AppCompatActivity
 import android.util.Size
 import android.view.Surface
 import android.view.TextureView
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.systemService
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.MediatorLiveData
+import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.Observer
 import jp.yama07.webcam.R
 import jp.yama07.webcam.camera.CameraCaptureSessionData
 import jp.yama07.webcam.camera.CameraCaptureSessionData.CameraCaptureSessionStateEvents
@@ -32,69 +32,44 @@ class MainActivity : AppCompatActivity() {
   private lateinit var server: MJpegHTTPD
   private val cameraImage = MutableLiveData<Yuv420Image>()
 
+  private lateinit var cameraComponent: CameraComponent
+  private val captureManager = MediatorLiveData<Unit>()
+  private lateinit var imageReader: ImageReader
+  private var imageSize: Size = Size(1440, 1080)
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     setContentView(R.layout.activity_main)
     startBackgroundThread()
-    server = MJpegHTTPD("0.0.0.0", 8080, this, cameraImage, 20, imgCnvHandler).also { it.start() }
 
     cameraComponent = CameraComponent(
-      cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager,
-      cameraId = "0", handler = backgroundHandler
+      cameraManager = systemService<CameraManager>(),
+      cameraId = "0",
+      handler = backgroundHandler
     )
     setupCaptureManager()
+    setupSurfaceTexture()
+    setupImageReader(imageSize.width, imageSize.height)
 
-    texture_view.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-      override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture?, width: Int, height: Int) {}
-      override fun onSurfaceTextureUpdated(surface: SurfaceTexture?) {}
-      override fun onSurfaceTextureDestroyed(surface: SurfaceTexture?): Boolean {
-        captureManager.removeObservers(this@MainActivity)
-        lifecycle.removeObserver(cameraComponent)
-        return true
-      }
-
-      override fun onSurfaceTextureAvailable(surface: SurfaceTexture?, width: Int, height: Int) {
-        Timber.d("onSurfaceTextureAvailable: $width x $height")
-        imageReader = ImageReader
-          .newInstance(width, height, ImageFormat.YUV_420_888, 2)
-          .apply {
-            setOnImageAvailableListener({ reader ->
-              val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-              val yuvImage = Yuv420Image(
-                yuvBytes = Array(3) { i ->
-                  val buf = image.planes[i].buffer
-                  ByteArray(buf.remaining()).also { buf.get(it) }
-                },
-                size = Size(image.width, image.height),
-                yRowStride = image.planes[0].rowStride,
-                uvRowStride = image.planes[1].rowStride,
-                uvPixelStride = image.planes[1].pixelStride
-              )
-              Timber.d("Post yuvImage: ${yuvImage.size}")
-              cameraImage.postValue(yuvImage)
-              image.close()
-            }, backgroundHandler)
-          }
-        lifecycle.addObserver(cameraComponent)
-        captureManager.observe(this@MainActivity, Observer {})
-      }
-    }
-
-//    cameraImage.observe(this) {
-//      Timber.d("Observe@mainActivity: ${it?.size}")
-//    }
-
-
+    lifecycle.addObserver(cameraComponent)
+    server = MJpegHTTPD("0.0.0.0", 8080, this, cameraImage, 20, imgCnvHandler).also { it.start() }
   }
 
   override fun onDestroy() {
     super.onDestroy()
     server.stop()
+    lifecycle.removeObserver(cameraComponent)
   }
 
-  private lateinit var cameraComponent: CameraComponent
-  private val captureManager = MediatorLiveData<Unit>()
-  private lateinit var imageReader: ImageReader
+  override fun onResume() {
+    super.onResume()
+    startBackgroundThread()
+  }
+
+  override fun onPause() {
+    super.onPause()
+    stopBackgroundThread()
+  }
 
   private fun setupCaptureManager() {
     captureManager.addSourceNonNullObserve(cameraComponent.cameraDeviceLiveData) { cameraDeviceData ->
@@ -120,14 +95,44 @@ class MainActivity : AppCompatActivity() {
     }
   }
 
-  override fun onResume() {
-    super.onResume()
-    startBackgroundThread()
+  private fun setupSurfaceTexture() {
+    texture_view.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+      override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture?, width: Int, height: Int) {}
+      override fun onSurfaceTextureUpdated(surface: SurfaceTexture?) {}
+      override fun onSurfaceTextureAvailable(surface: SurfaceTexture?, width: Int, height: Int) {
+        Timber.d("onSurfaceTextureAvailable: $width x $height")
+        imageSize = Size(width, height)
+        captureManager.observe(this@MainActivity, Observer {})
+      }
+
+      override fun onSurfaceTextureDestroyed(surface: SurfaceTexture?): Boolean {
+        captureManager.removeObservers(this@MainActivity)
+        return true
+      }
+    }
   }
 
-  override fun onPause() {
-    super.onPause()
-    stopBackgroundThread()
+  private fun setupImageReader(width: Int, height: Int) {
+    imageReader = ImageReader
+      .newInstance(width, height, ImageFormat.YUV_420_888, 2)
+      .apply {
+        setOnImageAvailableListener({ reader ->
+          val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+          val yuvImage = Yuv420Image(
+            yuvBytes = Array(3) { i ->
+              val buf = image.planes[i].buffer
+              ByteArray(buf.remaining()).also { buf.get(it) }
+            },
+            size = Size(image.width, image.height),
+            yRowStride = image.planes[0].rowStride,
+            uvRowStride = image.planes[1].rowStride,
+            uvPixelStride = image.planes[1].pixelStride
+          )
+          Timber.d("Post yuvImage: ${yuvImage.size}")
+          cameraImage.postValue(yuvImage)
+          image.close()
+        }, backgroundHandler)
+      }
   }
 
   private var backgroundThread: HandlerThread? = null
