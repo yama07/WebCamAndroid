@@ -1,5 +1,7 @@
 package jp.yama07.webcam.server
 
+import android.content.Context
+import android.graphics.Bitmap
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LiveData
 import android.os.Handler
@@ -18,7 +20,7 @@ import java.util.*
 class MJpegHTTPD(
   hostname: String?, port: Int,
   private val owner: LifecycleOwner,
-  private val src: LiveData<Yuv420Image>,
+  private val src: LiveData<Bitmap>,
   private val jpeg_quality: Int,
   private val handler: Handler?
 ) : NanoHTTPD(hostname, port) {
@@ -43,9 +45,7 @@ class MJpegHTTPD(
         val input = PipedInputStream(output)
         val bufferedOutput = BufferedOutputStream(output, OUTPUT_BUFFERED_SIZE)
 
-        src.observeAtOnce(owner, NonNullObserver { yuvImage ->
-          Yuv420ToBitmapConverter(handler).enqueue(yuvImage)
-            .observeAtOnce(owner, NonNullObserver { bmpImage ->
+        src.observeAtOnce(owner, NonNullObserver { bmpImage ->
               (handler ?: Handler(Looper.myLooper())).post {
                 val body = bmpImage.toJpegByteArray(jpeg_quality)
                 kotlin.runCatching {
@@ -58,7 +58,6 @@ class MJpegHTTPD(
                   }
                 }
               }
-            })
         })
         newChunkedResponse(Response.Status.OK, "image/jpeg", input)
       }
@@ -70,10 +69,8 @@ class MJpegHTTPD(
         val bufferedOutput = BufferedOutputStream(output, OUTPUT_BUFFERED_SIZE)
 
         val stateData = LiveDataStatus(LiveDataStatus.State.EMITTING)
-        src.observeByStatus(owner, stateData, NonNullObserver { yuvImage ->
+        src.observeByStatus(owner, stateData, NonNullObserver { bmpImage ->
           stateData.state = LiveDataStatus.State.SLEEPING
-          Yuv420ToBitmapConverter(handler).enqueue(yuvImage)
-            .observeAtOnce(owner, NonNullObserver { bmpImage ->
               (handler ?: Handler(Looper.myLooper())).post {
                 val jpgByteArray = bmpImage.toJpegByteArray(jpeg_quality)
                 kotlin.runCatching {
@@ -96,7 +93,6 @@ class MJpegHTTPD(
                   }
                 }
               }
-            })
         })
         newChunkedResponse(
           Response.Status.OK, "multipart/x-mixed-replace; boundary=$MJPEG_BOUNDARY", input

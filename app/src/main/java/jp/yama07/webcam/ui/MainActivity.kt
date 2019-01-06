@@ -1,5 +1,6 @@
 package jp.yama07.webcam.ui
 
+import android.graphics.Bitmap
 import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCaptureSession
@@ -23,19 +24,20 @@ import jp.yama07.webcam.camera.CameraCaptureSessionData.CameraCaptureSessionStat
 import jp.yama07.webcam.camera.CameraComponent
 import jp.yama07.webcam.camera.CameraDeviceData.DeviceStateEvents
 import jp.yama07.webcam.server.MJpegHTTPD
-import jp.yama07.webcam.server.Yuv420Image
+import jp.yama07.webcam.server.Yuv420ToBitmapConverter
 import jp.yama07.webcam.util.addSourceNonNullObserve
 import kotlinx.android.synthetic.main.activity_main.*
 import timber.log.Timber
 
 class MainActivity : AppCompatActivity() {
   private lateinit var server: MJpegHTTPD
-  private val cameraImage = MutableLiveData<Yuv420Image>()
+  private val cameraImage = MutableLiveData<Bitmap>()
 
   private lateinit var cameraComponent: CameraComponent
   private val captureManager = MediatorLiveData<Unit>()
   private lateinit var imageReader: ImageReader
   private var imageSize: Size = Size(1440, 1080)
+  private lateinit var converter: Yuv420ToBitmapConverter
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -50,6 +52,7 @@ class MainActivity : AppCompatActivity() {
     setupCaptureManager()
     setupSurfaceTexture()
     setupImageReader(imageSize.width, imageSize.height)
+    converter = Yuv420ToBitmapConverter(imgCnvHandler, this)
 
     lifecycle.addObserver(cameraComponent)
     server = MJpegHTTPD("0.0.0.0", 8080, this, cameraImage, 20, imgCnvHandler).also { it.start() }
@@ -118,19 +121,11 @@ class MainActivity : AppCompatActivity() {
       .apply {
         setOnImageAvailableListener({ reader ->
           val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-          val yuvImage = Yuv420Image(
-            yuvBytes = Array(3) { i ->
-              val buf = image.planes[i].buffer
-              ByteArray(buf.remaining()).also { buf.get(it) }
-            },
-            size = Size(image.width, image.height),
-            yRowStride = image.planes[0].rowStride,
-            uvRowStride = image.planes[1].rowStride,
-            uvPixelStride = image.planes[1].pixelStride
-          )
-          Timber.d("Post yuvImage: ${yuvImage.size}")
-          cameraImage.postValue(yuvImage)
+
+          val bmp = converter.execute(image)
+
           image.close()
+          cameraImage.postValue(bmp)
         }, backgroundHandler)
       }
   }
@@ -170,5 +165,4 @@ class MainActivity : AppCompatActivity() {
       Timber.e(e, "Exception!")
     }
   }
-
 }
