@@ -1,6 +1,5 @@
 package jp.yama07.webcam.server
 
-import android.content.Context
 import android.graphics.Bitmap
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LiveData
@@ -45,7 +44,7 @@ class MJpegHTTPD(
         val input = PipedInputStream(output)
         val bufferedOutput = BufferedOutputStream(output, OUTPUT_BUFFERED_SIZE)
 
-        src.observeAtOnce(owner, NonNullObserver { bmpImage ->
+        src.observeElementAt(owner, NonNullObserver { bmpImage ->
               (handler ?: Handler(Looper.myLooper())).post {
                 val body = bmpImage.toJpegByteArray(jpeg_quality)
                 kotlin.runCatching {
@@ -58,7 +57,7 @@ class MJpegHTTPD(
                   }
                 }
               }
-        })
+        },1)
         newChunkedResponse(Response.Status.OK, "image/jpeg", input)
       }
 

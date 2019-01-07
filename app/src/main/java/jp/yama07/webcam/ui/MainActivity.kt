@@ -122,10 +122,12 @@ class MainActivity : AppCompatActivity() {
         setOnImageAvailableListener({ reader ->
           val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
 
-          val bmp = converter.execute(image)
+          if (cameraImage.hasActiveObservers()) {
+            val bmp = converter.execute(image)
+            cameraImage.postValue(bmp)
+          }
 
           image.close()
-          cameraImage.postValue(bmp)
         }, backgroundHandler)
       }
   }
