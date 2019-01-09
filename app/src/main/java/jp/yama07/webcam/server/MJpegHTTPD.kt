@@ -1,10 +1,10 @@
 package jp.yama07.webcam.server
 
 import android.graphics.Bitmap
-import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.LiveData
 import android.os.Handler
 import android.os.Looper
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LiveData
 import fi.iki.elonen.NanoHTTPD
 import jp.yama07.webcam.util.*
 import timber.log.Timber
@@ -44,20 +44,20 @@ class MJpegHTTPD(
         val input = PipedInputStream(output)
         val bufferedOutput = BufferedOutputStream(output, OUTPUT_BUFFERED_SIZE)
 
-        src.observeElementAt(owner, NonNullObserver { bmpImage ->
-              (handler ?: Handler(Looper.myLooper())).post {
-                val body = bmpImage.toJpegByteArray(jpeg_quality)
-                kotlin.runCatching {
-                  bufferedOutput.use { it.write(body) }
-                }.onFailure { ex ->
-                  when (ex) {
-                    is IOException -> Timber.i("Pipe closed.")
-                    is SocketException -> Timber.i("Broken pipe.")
-                    else -> Timber.e(ex, "Unexpected error occurred.")
-                  }
-                }
+        src.observeElementAt(owner, 1, NonNullObserver { bmpImage ->
+          (handler ?: Handler(Looper.myLooper())).post {
+            val body = bmpImage.toJpegByteArray(jpeg_quality)
+            kotlin.runCatching {
+              bufferedOutput.use { it.write(body) }
+            }.onFailure { ex ->
+              when (ex) {
+                is IOException -> Timber.i("Pipe closed.")
+                is SocketException -> Timber.i("Broken pipe.")
+                else -> Timber.e(ex, "Unexpected error occurred.")
               }
-        },1)
+            }
+          }
+        })
         newChunkedResponse(Response.Status.OK, "image/jpeg", input)
       }
 
@@ -67,31 +67,31 @@ class MJpegHTTPD(
         val input = PipedInputStream(output)
         val bufferedOutput = BufferedOutputStream(output, OUTPUT_BUFFERED_SIZE)
 
-        val stateData = LiveDataStatus(LiveDataStatus.State.EMITTING)
-        src.observeByStatus(owner, stateData, NonNullObserver { bmpImage ->
-          stateData.state = LiveDataStatus.State.SLEEPING
-              (handler ?: Handler(Looper.myLooper())).post {
-                val jpgByteArray = bmpImage.toJpegByteArray(jpeg_quality)
-                kotlin.runCatching {
-                  bufferedOutput.let {
-                    it.write(MJPEG_BOUNDARY.toByteArray() + CRLF)
-                    it.write("Content-Type: image/jpeg".toByteArray() + CRLF)
-                    it.write("Content-Length: ${jpgByteArray.size}".toByteArray() + CRLF + CRLF)
-                    it.write(jpgByteArray + CRLF)
-                    it.flush()
-                  }
-                  stateData.state = LiveDataStatus.State.EMITTING
-                }.onFailure { ex ->
-                  stateData.state = LiveDataStatus.State.SUSPENDED
-                  kotlin.runCatching { bufferedOutput.close() }
-                    .onFailure { Timber.i("Fail to close output pipe.") }
-                  when (ex) {
-                    is IOException -> Timber.i("Pipe closed.")
-                    is SocketException -> Timber.i("Broken pipe.")
-                    else -> Timber.e(ex, "Unexpected error occurred.")
-                  }
-                }
+        val observerStatus = ObserverStatus(ObserverStatus.State.ACTIVE)
+        src.observeByStatus(owner, observerStatus, NonNullObserver { bmpImage ->
+          observerStatus.state = ObserverStatus.State.INACTIVE
+          (handler ?: Handler(Looper.myLooper())).post {
+            val jpgByteArray = bmpImage.toJpegByteArray(jpeg_quality)
+            kotlin.runCatching {
+              bufferedOutput.let {
+                it.write(MJPEG_BOUNDARY.toByteArray() + CRLF)
+                it.write("Content-Type: image/jpeg".toByteArray() + CRLF)
+                it.write("Content-Length: ${jpgByteArray.size}".toByteArray() + CRLF + CRLF)
+                it.write(jpgByteArray + CRLF)
+                it.flush()
               }
+              observerStatus.state = ObserverStatus.State.ACTIVE
+            }.onFailure { ex ->
+              observerStatus.state = ObserverStatus.State.REMOVED
+              kotlin.runCatching { bufferedOutput.close() }
+                .onFailure { Timber.i("Fail to close output pipe.") }
+              when (ex) {
+                is IOException -> Timber.i("Pipe closed.")
+                is SocketException -> Timber.i("Broken pipe.")
+                else -> Timber.e(ex, "Unexpected error occurred.")
+              }
+            }
+          }
         })
         newChunkedResponse(
           Response.Status.OK, "multipart/x-mixed-replace; boundary=$MJPEG_BOUNDARY", input

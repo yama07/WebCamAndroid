@@ -8,8 +8,8 @@ import androidx.lifecycle.Observer
 
 fun <T> LiveData<T>.observeElementAt(
   lifecycleOwner: LifecycleOwner,
-  observer: Observer<T>,
-  index: Int
+  index: Int,
+  observer: Observer<T>
 ) {
   Handler(Looper.getMainLooper()).post {
     var count = 0
@@ -25,14 +25,14 @@ fun <T> LiveData<T>.observeElementAt(
 }
 
 fun <T> LiveData<T>.observeByStatus(
-  lifecycleOwner: LifecycleOwner, status: LiveDataStatus, observer: Observer<T>
+  lifecycleOwner: LifecycleOwner, status: ObserverStatus, observer: Observer<T>
 ) {
   Handler(Looper.getMainLooper()).post {
     observe(lifecycleOwner, object : Observer<T> {
       override fun onChanged(t: T?) {
         when (status.state) {
-          LiveDataStatus.State.EMITTING -> observer.onChanged(t)
-          LiveDataStatus.State.SUSPENDED -> removeObserver(this)
+          ObserverStatus.State.ACTIVE -> observer.onChanged(t)
+          ObserverStatus.State.REMOVED -> removeObserver(this)
           else -> {
             /* Do nothing */
           }
@@ -42,8 +42,8 @@ fun <T> LiveData<T>.observeByStatus(
   }
 }
 
-data class LiveDataStatus(var state: LiveDataStatus.State = LiveDataStatus.State.EMITTING) {
+data class ObserverStatus(var state: ObserverStatus.State) {
   enum class State {
-    EMITTING, SLEEPING, SUSPENDED
+    ACTIVE, INACTIVE, REMOVED
   }
 }

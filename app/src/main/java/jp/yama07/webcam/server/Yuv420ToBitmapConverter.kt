@@ -15,6 +15,11 @@ class Yuv420ToBitmapConverter(val handler: Handler?, val context: Context) {
   private val rs = RenderScript.create(context)
   private val yuvToRgbIntrinsic = ScriptIntrinsicYuvToRGB.create(rs, Element.U8_4(rs))
 
+  fun destroy() {
+    yuvToRgbIntrinsic.destroy()
+    rs.destroy()
+  }
+
   fun enqueue(image: Image): LiveData<Bitmap> {
     val liveData = MutableLiveData<Bitmap>()
     (handler ?: Handler(Looper.myLooper())).post {

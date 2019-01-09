@@ -25,7 +25,9 @@ import jp.yama07.webcam.camera.CameraComponent
 import jp.yama07.webcam.camera.CameraDeviceData.DeviceStateEvents
 import jp.yama07.webcam.server.MJpegHTTPD
 import jp.yama07.webcam.server.Yuv420ToBitmapConverter
+import jp.yama07.webcam.util.NonNullObserver
 import jp.yama07.webcam.util.addSourceNonNullObserve
+import jp.yama07.webcam.util.observeElementAt
 import kotlinx.android.synthetic.main.activity_main.*
 import timber.log.Timber
 
@@ -52,14 +54,16 @@ class MainActivity : AppCompatActivity() {
     setupCaptureManager()
     setupSurfaceTexture()
     setupImageReader(imageSize.width, imageSize.height)
-    converter = Yuv420ToBitmapConverter(imgCnvHandler, this)
+    converter = Yuv420ToBitmapConverter(backgroundHandler, this)
 
     lifecycle.addObserver(cameraComponent)
-    server = MJpegHTTPD("0.0.0.0", 8080, this, cameraImage, 20, imgCnvHandler).also { it.start() }
+    server =
+        MJpegHTTPD("0.0.0.0", 8080, this, cameraImage, 20, backgroundHandler).also { it.start() }
   }
 
   override fun onDestroy() {
     super.onDestroy()
+    converter.destroy()
     server.stop()
     lifecycle.removeObserver(cameraComponent)
   }
@@ -115,36 +119,35 @@ class MainActivity : AppCompatActivity() {
     }
   }
 
+  private var isProcessingFrame = false
   private fun setupImageReader(width: Int, height: Int) {
     imageReader = ImageReader
       .newInstance(width, height, ImageFormat.YUV_420_888, 2)
       .apply {
         setOnImageAvailableListener({ reader ->
           val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-
-          if (cameraImage.hasActiveObservers()) {
-            val bmp = converter.execute(image)
-            cameraImage.postValue(bmp)
+          if (cameraImage.hasActiveObservers() && !isProcessingFrame) {
+            isProcessingFrame = true
+            converter.enqueue(image)
+              .observeElementAt(this@MainActivity, 0, NonNullObserver {
+                cameraImage.postValue(it)
+                image.close()
+                isProcessingFrame = false
+              })
+          } else {
+            image.close()
           }
-
-          image.close()
         }, backgroundHandler)
       }
   }
 
   private var backgroundThread: HandlerThread? = null
   private var backgroundHandler: Handler? = null
-  private var imgCnvThread: HandlerThread? = null
-  private var imgCnvHandler: Handler? = null
+
   private fun startBackgroundThread() {
     backgroundThread = HandlerThread("ImageListener")
     backgroundThread?.start()
     backgroundHandler = Handler(backgroundThread?.looper)
-
-
-    imgCnvThread = HandlerThread("imageConverter")
-    imgCnvThread?.start()
-    imgCnvHandler = Handler(imgCnvThread?.looper)
   }
 
   private fun stopBackgroundThread() {
@@ -154,16 +157,6 @@ class MainActivity : AppCompatActivity() {
       backgroundThread = null
       backgroundHandler = null
     } catch (e: InterruptedException) {
-      Timber.e(e, "Exception!")
-    }
-
-
-    imgCnvThread?.quitSafely()
-    try {
-      imgCnvThread?.join()
-      imgCnvThread = null
-      imgCnvHandler = null
-    } catch (e: InternalError) {
       Timber.e(e, "Exception!")
     }
   }
