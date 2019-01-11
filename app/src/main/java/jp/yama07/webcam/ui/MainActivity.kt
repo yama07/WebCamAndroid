@@ -54,11 +54,11 @@ class MainActivity : AppCompatActivity() {
     setupCaptureManager()
     setupSurfaceTexture()
     setupImageReader(imageSize.width, imageSize.height)
-    converter = Yuv420ToBitmapConverter(backgroundHandler, this)
+    converter = Yuv420ToBitmapConverter(imgCnvHandler, this)
 
     lifecycle.addObserver(cameraComponent)
     server =
-        MJpegHTTPD("0.0.0.0", 8080, this, cameraImage, 20, backgroundHandler).also { it.start() }
+        MJpegHTTPD("0.0.0.0", 8080, this, cameraImage, 20, mjpegHttpdHandler).also { it.start() }
   }
 
   override fun onDestroy() {
@@ -143,11 +143,20 @@ class MainActivity : AppCompatActivity() {
 
   private var backgroundThread: HandlerThread? = null
   private var backgroundHandler: Handler? = null
+  private var imgCnvThread: HandlerThread? = null
+  private var imgCnvHandler: Handler? = null
+  private var mjpegHttpdThread: HandlerThread? = null
+  private var mjpegHttpdHandler: Handler? = null
 
   private fun startBackgroundThread() {
-    backgroundThread = HandlerThread("ImageListener")
-    backgroundThread?.start()
+    backgroundThread = HandlerThread("ImageListener").also { it.start() }
     backgroundHandler = Handler(backgroundThread?.looper)
+
+    imgCnvThread = HandlerThread("imageConverter").also { it.start() }
+    imgCnvHandler = Handler(imgCnvThread?.looper)
+
+    mjpegHttpdThread = HandlerThread("mjpegHttpd").also { it.start() }
+    mjpegHttpdHandler = Handler(mjpegHttpdThread?.looper)
   }
 
   private fun stopBackgroundThread() {
@@ -156,6 +165,24 @@ class MainActivity : AppCompatActivity() {
       backgroundThread?.join()
       backgroundThread = null
       backgroundHandler = null
+    } catch (e: InterruptedException) {
+      Timber.e(e, "Exception!")
+    }
+
+    imgCnvThread?.quitSafely()
+    try {
+      imgCnvThread?.join()
+      imgCnvThread = null
+      imgCnvHandler = null
+    } catch (e: InterruptedException) {
+      Timber.e(e, "Exception!")
+    }
+
+    mjpegHttpdThread?.quitSafely()
+    try {
+      mjpegHttpdThread?.join()
+      mjpegHttpdThread = null
+      mjpegHttpdHandler = null
     } catch (e: InterruptedException) {
       Timber.e(e, "Exception!")
     }
