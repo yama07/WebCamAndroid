@@ -1,5 +1,6 @@
 package jp.yama07.webcam.ui
 
+import android.Manifest
 import android.graphics.Bitmap
 import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
@@ -18,6 +19,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MediatorLiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.Observer
+import com.google.android.material.snackbar.Snackbar
 import jp.yama07.webcam.R
 import jp.yama07.webcam.camera.CameraCaptureSessionData
 import jp.yama07.webcam.camera.CameraCaptureSessionData.CameraCaptureSessionStateEvents
@@ -29,8 +31,12 @@ import jp.yama07.webcam.util.NonNullObserver
 import jp.yama07.webcam.util.addSourceNonNullObserve
 import jp.yama07.webcam.util.observeElementAt
 import kotlinx.android.synthetic.main.activity_main.*
+import permissions.dispatcher.NeedsPermission
+import permissions.dispatcher.OnPermissionDenied
+import permissions.dispatcher.RuntimePermissions
 import timber.log.Timber
 
+@RuntimePermissions
 class MainActivity : AppCompatActivity() {
   private lateinit var server: MJpegHTTPD
   private val cameraImage = MutableLiveData<Bitmap>()
@@ -51,7 +57,7 @@ class MainActivity : AppCompatActivity() {
       cameraId = "0",
       handler = backgroundHandler
     )
-    setupCaptureManager()
+    setupCaptureManagerWithPermissionCheck()
     setupSurfaceTexture()
     setupImageReader(imageSize.width, imageSize.height)
     converter = Yuv420ToBitmapConverter(imgCnvHandler, this)
@@ -78,7 +84,8 @@ class MainActivity : AppCompatActivity() {
     stopBackgroundThread()
   }
 
-  private fun setupCaptureManager() {
+  @NeedsPermission(Manifest.permission.CAMERA)
+  fun setupCaptureManager() {
     captureManager.addSourceNonNullObserve(cameraComponent.cameraDeviceLiveData) { cameraDeviceData ->
       var captureSession: CameraCaptureSession? = null
       var captureSessionLiveData: LiveData<CameraCaptureSessionData>? = null
@@ -186,5 +193,19 @@ class MainActivity : AppCompatActivity() {
     } catch (e: InterruptedException) {
       Timber.e(e, "Exception!")
     }
+  }
+
+  @OnPermissionDenied(Manifest.permission.CAMERA)
+  fun onCameraDenied() {
+    Snackbar.make(content, "カメラを使用できません。", Snackbar.LENGTH_LONG).show()
+  }
+
+  override fun onRequestPermissionsResult(
+    requestCode: Int,
+    permissions: Array<out String>,
+    grantResults: IntArray
+  ) {
+    super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    onRequestPermissionsResult(requestCode, grantResults)
   }
 }
