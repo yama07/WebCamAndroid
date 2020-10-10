@@ -1,11 +1,11 @@
 package jp.yama07.webcam.camera
 
-import androidx.lifecycle.MutableLiveData
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CaptureRequest
 import android.os.Handler
 import android.view.Surface
+import androidx.lifecycle.MutableLiveData
 import timber.log.Timber
 
 data class CameraDeviceData(

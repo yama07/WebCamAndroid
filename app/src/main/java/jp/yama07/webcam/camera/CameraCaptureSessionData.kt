@@ -1,9 +1,9 @@
 package jp.yama07.webcam.camera
 
-import androidx.lifecycle.MutableLiveData
 import android.hardware.camera2.*
 import android.os.Handler
 import android.view.Surface
+import androidx.lifecycle.MutableLiveData
 
 data class CameraCaptureSessionData(
   val cameraCaptureSessionStateEvents: CameraCaptureSessionStateEvents,

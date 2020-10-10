@@ -1,6 +1,7 @@
 package jp.yama07.webcam.ui
 
 import android.Manifest
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
@@ -14,7 +15,6 @@ import android.util.Size
 import android.view.Surface
 import android.view.TextureView
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.systemService
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MediatorLiveData
 import androidx.lifecycle.MutableLiveData
@@ -53,7 +53,7 @@ class MainActivity : AppCompatActivity() {
     startBackgroundThread()
 
     cameraComponent = CameraComponent(
-      cameraManager = systemService<CameraManager>(),
+      cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager,
       cameraId = "0",
       handler = backgroundHandler
     )
@@ -64,7 +64,7 @@ class MainActivity : AppCompatActivity() {
 
     lifecycle.addObserver(cameraComponent)
     server =
-        MJpegHTTPD("0.0.0.0", 8080, this, cameraImage, 20, mjpegHttpdHandler).also { it.start() }
+      MJpegHTTPD("0.0.0.0", 8080, this, cameraImage, 20, mjpegHttpdHandler).also { it.start() }
   }
 
   override fun onDestroy() {
@@ -95,7 +95,7 @@ class MainActivity : AppCompatActivity() {
         val previewCaptureRequest = cameraDeviceData.createPreviewCaptureRequest(targetSurfaces)
           ?: return@addSourceNonNullObserve
         captureSessionLiveData =
-            cameraDeviceData.createCaptureSession(targetSurfaces, backgroundHandler)
+          cameraDeviceData.createCaptureSession(targetSurfaces, backgroundHandler)
         captureManager.addSourceNonNullObserve(captureSessionLiveData) {
           if (it.cameraCaptureSessionStateEvents == CameraCaptureSessionStateEvents.ON_READY) {
             captureSession = it.cameraCaptureSession
